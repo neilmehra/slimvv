@@ -120,7 +120,7 @@ TEST(VectorTest, MultiplePushBack) {
 
 TEST(VectorTest, EmplaceBackString) {
   VectorType vec;
-  vec.emblace_back(std::in_place_type<std::string>, "Emplaced");
+  vec.emplace_back(std::in_place_type<std::string>, "Emplaced");
 
   EXPECT_EQ(2u, vec[0].index());
   EXPECT_EQ("Emplaced", vec[0].get<std::string>());

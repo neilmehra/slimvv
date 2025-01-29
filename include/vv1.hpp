@@ -2,12 +2,15 @@
 
 #include <cassert>
 #include <cstddef>
-#include <iostream>
 #include <limits>
-#include <ostream>
-#include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
+
+// This vv uses a custom variant type that stores a pointer rather than an
+// aligned_union. The minimum possible memory footprint 3 + (2 * vector::size)
+// bytes, but slow asf due to heap allocs on every push_back + deref every time
+// we attempt to index + no cache locality wrt the elements
 
 namespace v1 {
 
@@ -164,105 +167,6 @@ private:
   }
 };
 
-template <class... Types> class vector {
-public:
-  using value_type = variant<Types...>;
-
-  vector() : capacity_(0), size_(0), data_(nullptr) {}
-
-  vector(const vector& rhs)
-      : size_(rhs.size_), capacity_(rhs.capacity_),
-        data_(new value_type[capacity_]) {
-    for (std::size_t i = 0; i < rhs.size_; i++) {
-      data_[i] = rhs.data_[i];
-    }
-  }
-
-  vector(vector&& rhs)
-      : size_(rhs.size_), capacity_(rhs.capacity_), data_(rhs.data_) {
-    rhs.data_ = nullptr;
-  }
-
-  vector& operator=(const vector& rhs) {
-    if (this != &rhs) {
-      size_ = rhs.size_;
-      reserve(capacity_);
-      for (std::size_t i = 0; i < rhs.size_; i++) {
-        data_[i] = rhs.data_[i];
-      }
-      capacity_ = rhs.capacity_;
-    }
-    return *this;
-  }
-
-  vector& operator=(vector&& rhs) {
-    if (this != &rhs) {
-      size_ = rhs.size_;
-      capacity_ = rhs.capacity_;
-      data_ = rhs.data_;
-      rhs.data_ = nullptr;
-    }
-    return *this;
-  }
-
-  ~vector() noexcept { delete[] data_; }
-
-  template <class U> void push_back(const U& rhs) {
-    ensure_size();
-    data_[size_++] = value_type(rhs);
-  }
-
-  void push_back(const value_type& v) {
-    ensure_size();
-    data_[size_++] = v;
-  }
-
-  template <class U> void push_back(U&& rhs) {
-    ensure_size();
-    data_[size_++] = value_type(std::move(rhs));
-  }
-
-  template <class U> void push_back(value_type&& v) {
-    ensure_size();
-    data_[size_++] = value_type(std::move(v));
-  }
-
-  template <class U, class... Args>
-  void emblace_back(std::in_place_type_t<U> in_place, Args&&... args) {
-    ensure_size();
-    data_[size_++] = value_type(in_place, std::forward<Args>(args)...);
-  }
-
-  constexpr void reserve(std::size_t new_cap) {
-    if (new_cap > capacity_) {
-      value_type* _data = new value_type[new_cap];
-      for (std::size_t i = 0; i < capacity_; i++) {
-        _data[i] = data_[i];
-      }
-      std::swap(data_, _data);
-      capacity_ = new_cap;
-    }
-  }
-
-  [[nodiscard]] constexpr value_type& operator[](std::size_t index) {
-    return data_[index];
-  }
-
-  [[nodiscard]] constexpr std::size_t size() const noexcept { return size_; }
-
-  // [[nodiscard]] constexpr std::size_t size() const noexcept {
-  //   return size;
-  // }
-
-private:
-  std::size_t capacity_;
-  std::size_t size_;
-  value_type* data_;
-
-  void ensure_size() {
-    if (capacity_ == size_)
-      reserve(2 * capacity_ + 1);
-  }
-};
+template <class... Types> using vector = std::vector<variant<Types...>>;
 
 } // namespace v1
