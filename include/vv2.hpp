@@ -3,8 +3,9 @@
 #include <cassert>
 #include <cstddef>
 #include <cstring>
-#include <typeinfo>
+#include <iostream>
 #include <type_traits>
+#include <typeinfo>
 
 namespace vv2 {
 
@@ -12,22 +13,24 @@ template <class... Types> class vector {
 public:
   struct Element {
     std::size_t type_index;
-    void* data;
+    void *data;
   };
 
   vector()
-      : size_(0), capacity(0), data(nullptr), offsets(nullptr),
-        type_size(nullptr) {}
+      : size_(0), capacity(0), entries(0), data(nullptr), offsets(nullptr),
+        type_size(nullptr), types(nullptr) {}
 
   ~vector() {
     delete[] data;
     delete[] offsets;
     delete[] type_size;
+    delete[] types;
   }
 
-  template <class U> void push_back(const U& u) {
-    if (size_ == entries)
+  template <class U> void push_back(const U &u) {
+    if (size_ == entries) {
       reserve_entries(2 * entries + 1);
+    }
 
     std::size_t index = find_type_index<0, U, Types...>();
 
@@ -48,15 +51,15 @@ public:
   [[nodiscard]] Element operator[](std::size_t index) const {
     return {
         .type_index{types[index]},
-        .data{static_cast<void*>(data + offsets[index])},
+        .data{static_cast<void *>(data + offsets[index])},
     };
   }
 
-  template <class T> [[nodiscard]] T& get(std::size_t index) const {
+  template <class T> [[nodiscard]] T &get(std::size_t index) const {
     if (types[index] != find_type_index<0, T, Types...>()) {
       throw std::bad_cast();
     }
-    return *reinterpret_cast<T*>(data + offsets[index]);
+    return *reinterpret_cast<T *>(data + offsets[index]);
   }
 
   [[nodiscard]] std::size_t size() const noexcept { return size_; }
@@ -66,16 +69,16 @@ private:
   std::size_t capacity;
   std::size_t entries;
 
-  std::byte* data;
-  std::size_t* type_size;
-  std::size_t* types;
-  std::size_t* offsets;
+  std::byte *data;
+  std::size_t *type_size;
+  std::size_t *types;
+  std::size_t *offsets;
 
   void reserve_entries(std::size_t new_entries) {
     if (new_entries > entries) {
-      std::size_t* new_offsets = new std::size_t[new_entries];
-      std::size_t* new_type_size = new std::size_t[new_entries];
-      std::size_t* new_types = new std::size_t[new_entries];
+      std::size_t *new_offsets = new std::size_t[new_entries];
+      std::size_t *new_type_size = new std::size_t[new_entries];
+      std::size_t *new_types = new std::size_t[new_entries];
 
       for (int i = 0; i < size_; i++) {
         new_offsets[i] = offsets[i];
@@ -96,7 +99,7 @@ private:
 
   void reserve_cap(std::size_t new_cap) {
     if (new_cap > capacity) {
-      std::byte* new_data = new std::byte[new_cap];
+      std::byte *new_data = new std::byte[new_cap];
       if (data) {
         std::memcpy(new_data, data, capacity);
         delete[] data;
