@@ -2,163 +2,118 @@
 
 #include <cassert>
 #include <cstddef>
-#include <iostream>
-#include <tuple>
-#include <type_traits>
+#include <cstring>
 #include <typeinfo>
+#include <type_traits>
 
 namespace vv2 {
 
-namespace detail {
-
-using copy_fptr = void* (*)(const void* const);
-template <class T> static void* copy_impl(const void* const p) {
-  return new T(*static_cast<const T* const>(p));
-}
-
-// ok
-// at the very least, we know that we can find what type is at index i
-// now we need some way of finding what index is type k at
-template <std::size_t Cur, class T, class... TN> struct TypeByIndex {
-  using type = T;
-  using next_type = TypeByIndex<Cur + 1, TN...>;
-  static bool flag;
-
-  static void execute(std::size_t index) {
-    flag = false;
-    if (index == Cur) {
-      flag = true;
-    }
-  }
-};
-
-template <std::size_t Cur, class T> struct TypeByIndex<Cur, T> {
-  using type = T;
-  static bool flag;
-
-  static void execute(std::size_t index) { flag = (index == Cur); }
-};
-
-template <class U, class... TN> struct IndexByType {
-  static void execute(const char* name) {
-    if (name == typeid(U).name()) {
-
-    } else {
-      IndexByType<TN...>::execute(name);
-    }
-  }
-};
-
-template <class U> struct IndexByType<U> {
-  static void execute(const char* name) {
-    if (name == typeid(U).name()) {
-
-    } else {
-      assert(false);
-    }
-  }
-};
-
-template <class U, class... Us> struct TypeIndex;
-
-template <class U> struct TypeIndex<U> {};
-
-template <class U, class First, class... Rest>
-struct TypeIndex<U, First, Rest...> {
-  static constexpr std::size_t value =
-      std::is_same_v<U, First> ? 0 : 1 + TypeIndex<U, Rest...>::value;
-};
-
-template <class U, class... Us>
-static constexpr std::size_t TypeIndexV = TypeIndex<U, Us...>::value;
-
-} // namespace detail
-
 template <class... Types> class vector {
 public:
-  static constexpr std::size_t N = sizeof...(Types);
+  struct Element {
+    std::size_t type_index;
+    void* data;
+  };
 
-  // void handleByIndex(std::size_t index) {
-  //   RuntimeType<0, Types...>::execute(index);
-  // }
+  vector()
+      : size_(0), capacity(0), data(nullptr), offsets(nullptr),
+        type_size(nullptr) {}
 
-  std::size_t size;
-  std::size_t capacity;
-  void** data;
-  std::size_t* ptr;
-  std::size_t* types;
-};
-
-template <class... Types> class vector2 {
-public:
-  static constexpr std::size_t N = sizeof...(Types);
-  using tt = std::tuple<std::type_identity<Types>...>;
-
-  int test() {
-    tt t{};
-    return sizeof(tt);
-  }
-
-  std::size_t size;
-  std::size_t capacity;
-  void** data;
-  std::size_t* offsets;
-  std::size_t* types;
-};
-
-template <class... Types> struct Vec {
-  Vec()
-      : size(0), capacity(0), data(nullptr), offsets(nullptr), types(nullptr) {}
-
-  ~Vec() {
+  ~vector() {
     delete[] data;
     delete[] offsets;
-    delete[] types;
+    delete[] type_size;
   }
 
-  void reserve(std::size_t new_cap) {
-    if (new_cap > capacity) {
-      capacity = new_cap;
-      void** new_data = new void*[capacity];
-      std::size_t* new_offsets = new std::size_t[capacity];
-      std::size_t* new_types = new std::size_t[capacity];
-      for (int i = 0; i < size; i++) {
-        new_data[i] = data[i];
+  template <class U> void push_back(const U& u) {
+    if (size_ == entries)
+      reserve_entries(2 * entries + 1);
+
+    std::size_t index = find_type_index<0, U, Types...>();
+
+    type_size[size_] = sizeof(U);
+    types[size_] = index;
+
+    if (size_ > 0) {
+      offsets[size_] = offsets[size_ - 1] + type_size[size_ - 1];
+    } else {
+      offsets[size_] = 0;
+    }
+
+    reserve_cap(offsets[size_] + type_size[size_] + 1);
+    std::memcpy(data + offsets[size_], &u, sizeof(U));
+    size_++;
+  }
+
+  [[nodiscard]] Element operator[](std::size_t index) const {
+    return {
+        .type_index{types[index]},
+        .data{static_cast<void*>(data + offsets[index])},
+    };
+  }
+
+  template <class T> [[nodiscard]] T& get(std::size_t index) const {
+    if (types[index] != find_type_index<0, T, Types...>()) {
+      throw std::bad_cast();
+    }
+    return *reinterpret_cast<T*>(data + offsets[index]);
+  }
+
+  [[nodiscard]] std::size_t size() const noexcept { return size_; }
+
+private:
+  std::size_t size_;
+  std::size_t capacity;
+  std::size_t entries;
+
+  std::byte* data;
+  std::size_t* type_size;
+  std::size_t* types;
+  std::size_t* offsets;
+
+  void reserve_entries(std::size_t new_entries) {
+    if (new_entries > entries) {
+      std::size_t* new_offsets = new std::size_t[new_entries];
+      std::size_t* new_type_size = new std::size_t[new_entries];
+      std::size_t* new_types = new std::size_t[new_entries];
+
+      for (int i = 0; i < size_; i++) {
         new_offsets[i] = offsets[i];
+        new_type_size[i] = type_size[i];
         new_types[i] = types[i];
       }
-      std::swap(new_data, data);
-      std::swap(new_offsets, offsets);
-      std::swap(new_types, types);
+
+      delete[] offsets;
+      delete[] type_size;
+      delete[] types;
+
+      offsets = new_offsets;
+      type_size = new_type_size;
+      types = new_types;
+      entries = new_entries;
     }
   }
 
-  template <class U> void push_back(const U& u) {}
-
-  void ensure_size() { reserve(2 * capacity + 1); }
-
-  template <class U> U& operator[](std::size_t index) {
-    auto chk = detail::TypeByIndex<0, Types...>{};
-    chk.execute(index);
-    bool done = chk.flag;
-    while (!done) {
-      chk = decltype(chk)::next_type;
-      done = chk.flag;
+  void reserve_cap(std::size_t new_cap) {
+    if (new_cap > capacity) {
+      std::byte* new_data = new std::byte[new_cap];
+      if (data) {
+        std::memcpy(new_data, data, capacity);
+        delete[] data;
+      }
+      data = new_data;
+      capacity = new_cap;
     }
   }
 
-  std::size_t size;
-  std::size_t capacity;
-  void** data;
-  std::size_t* offsets;
-  std::size_t* types;
+  template <std::size_t I, class U, class T, class... TN>
+  std::size_t find_type_index() const {
+    if constexpr (std::is_same_v<std::decay_t<U>, std::decay_t<T>>) {
+      return I;
+    } else {
+      return find_type_index<I + 1, U, TN...>();
+    }
+  }
 };
-
-// ok
-// what specifically do we need?
-// when we index, we need to know how much to read, and we need to have offsets
-// and we need to know what type it is, to convert back?
-//
-// talk says store an index that corresponds to the type
 
 } // namespace vv2
