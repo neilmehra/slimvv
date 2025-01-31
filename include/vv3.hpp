@@ -13,21 +13,76 @@ template <class... Types> class vector {
 public:
   struct Element {
     std::size_t type_index;
-    void* data;
+    std::byte* data;
   };
 
   vector()
       : size_(0), capacity(0), entries(0), data(nullptr), offsets(nullptr),
-        type_size(nullptr), types(nullptr) {}
+        type_size(nullptr), type_index(nullptr), type_align(nullptr) {}
 
-  ~vector() {
+  ~vector() { delete_data(); }
+
+  // have to set size_ to 0 first, otherwise reserve_entries would access
+  // non-owned memory
+  vector(const vector& rhs) {
+    reset();                      // bad practice?
+    reserve_entries(rhs.entries); // handles initialization of entries, offsets,
+                                  // type_size, type_index, type_align
+    size_ = rhs.size_;
     for (std::size_t i = 0; i < size_; i++) {
-      dtable[types[i]](data + offsets[i]);
+      type_size[i] = rhs.type_size[i];
+      type_index[i] = rhs.type_index[i];
+      type_align[i] = rhs.type_align[i];
+      place_obj(
+          i, rhs.data + rhs.offsets[i],
+          ctable[type_index[i]]); // capacity will automatically grow to handle
+                                  // new offsets (if alignment requires it)
     }
-    delete[] data;
-    delete[] offsets;
-    delete[] type_size;
-    delete[] types;
+  }
+
+  vector(vector&& rhs)
+      : size_(rhs.size_), capacity(rhs.capacity), entries(rhs.entries),
+        data(rhs.data), offsets(rhs.offsets), type_size(rhs.type_size),
+        type_index(rhs.type_index), type_align(rhs.type_align) {
+    rhs.reset();
+  }
+
+  vector& operator=(const vector& rhs) {
+    if (this != &rhs) {
+      delete_data();
+      reset();
+
+      reserve_entries(
+          rhs.entries); // handles initialization of entries, offsets,
+                        // type_size, type_index, type_align
+      size_ = rhs.size_;
+      for (std::size_t i = 0; i < size_; i++) {
+        type_size[i] = rhs.type_size[i];
+        type_index[i] = rhs.type_index[i];
+        type_align[i] = rhs.type_align[i];
+        place_obj(i, rhs.data + rhs.offsets[i],
+                  ctable[type_index[i]]); // capacity will automatically grow to
+                                          // handle new offsets (if alignment
+                                          // requires it)
+      }
+    }
+    return *this;
+  }
+
+  vector& operator=(vector&& rhs) {
+    if (this != &rhs) {
+      delete_data();
+      size_ = rhs.size_;
+      capacity = rhs.capacity;
+      entries = rhs.entries;
+      data = rhs.data;
+      offsets = rhs.offsets;
+      type_size = rhs.type_size;
+      type_index = rhs.type_index;
+      type_align = rhs.type_align;
+      rhs.reset();
+    }
+    return *this;
   }
 
   template <class U> void push_back(const U& u) {
@@ -38,33 +93,39 @@ public:
     std::size_t index = find_type_index<0, U, Types...>();
 
     type_size[size_] = sizeof(U);
-    types[size_] = index;
+    type_index[size_] = index;
+    type_align[size_] = alignof(U);
 
-    if (size_ > 0) {
-      offsets[size_] = offsets[size_ - 1] + type_size[size_ - 1];
-    } else {
-      offsets[size_] = 0;
-    }
-
-    std::uintptr_t addr =
-        reinterpret_cast<std::uintptr_t>(data + offsets[size_]);
-    offsets[size_] += get_padding(addr, alignof(U));
-    ;
-
-    reserve_cap(offsets[size_] + type_size[size_] + 1);
-    ::new (data + offsets[size_]) U(u);
+    place_obj(size_, reinterpret_cast<std::byte*>(&u),
+              ctable[type_index[size_]]);
     size_++;
   }
 
-  [[nodiscard]] Element operator[](std::size_t index) const {
+  template <class U> void push_back(U&& u) {
+    if (size_ == entries) {
+      reserve_entries(2 * entries + 1);
+    }
+
+    std::size_t index = find_type_index<0, U, Types...>();
+
+    type_size[size_] = sizeof(U);
+    type_index[size_] = index;
+    type_align[size_] = alignof(U);
+
+    place_obj(size_, reinterpret_cast<std::byte*>(&u),
+              mtable[type_index[size_]]);
+    size_++;
+  }
+
+  [[nodiscard]] Element operator[](std::size_t index) {
     return {
-        .type_index{types[index]},
-        .data{static_cast<void*>(data + offsets[index])},
+        .type_index{type_index[index]},
+        .data{data + offsets[index]},
     };
   }
 
-  template <class T> [[nodiscard]] T& get(std::size_t index) const {
-    if (types[index] != find_type_index<0, T, Types...>()) {
+  template <class T> [[nodiscard]] T& get(std::size_t index) {
+    if (type_index[index] != find_type_index<0, T, Types...>()) {
       throw std::bad_cast();
     }
     return *reinterpret_cast<T*>(data + offsets[index]);
@@ -78,17 +139,17 @@ private:
   using cm_fptr_t = void (*)(std::byte* const, const std::byte* const);
 
   template <class T> static void destroy_impl(std::byte* const p) {
-    static_cast<T*>(p)->~T();
+    reinterpret_cast<T*>(p)->~T();
   }
 
   template <class T>
-  static std::byte* copy_impl(std::byte* const loc, std::byte* p) {
-    ::new (loc) T(*static_cast<const T* const>(p));
+  static std::byte* copy_impl(std::byte* const loc, const std::byte* const p) {
+    ::new (loc) T(*reinterpret_cast<const T* const>(p));
   }
 
   template <class T>
-  static std::byte* move_impl(std::byte* const loc, std::byte* p) {
-    ::new (loc) T(*static_cast<const T* const>(p));
+  static std::byte* move_impl(std::byte* const loc, const std::byte* const p) {
+    ::new (loc) T(*reinterpret_cast<const T* const>(p));
   }
 
   static constexpr dtor_fptr_t dtable[N]{destroy_impl<Types>...};
@@ -100,30 +161,35 @@ private:
   std::size_t entries;
 
   std::byte* data;
-  std::size_t* type_size;
-  std::size_t* types;
   std::size_t* offsets;
+  std::size_t* type_size;
+  std::size_t* type_index;
+  std::size_t* type_align;
 
   void reserve_entries(std::size_t new_entries) {
     if (new_entries > entries) {
       std::size_t* new_offsets = new std::size_t[new_entries];
       std::size_t* new_type_size = new std::size_t[new_entries];
       std::size_t* new_types = new std::size_t[new_entries];
+      std::size_t* new_type_align = new std::size_t[new_entries];
 
       for (int i = 0; i < size_; i++) {
         new_offsets[i] = offsets[i];
         new_type_size[i] = type_size[i];
-        new_types[i] = types[i];
+        new_types[i] = type_index[i];
+        new_type_align[i] = type_align[i];
       }
 
       delete[] offsets;
       delete[] type_size;
-      delete[] types;
+      delete[] type_index;
+      delete[] type_align;
 
       offsets = new_offsets;
       type_size = new_type_size;
-      types = new_types;
+      type_index = new_types;
       entries = new_entries;
+      type_align = new_type_align;
     }
   }
 
@@ -150,7 +216,45 @@ private:
 
   std::size_t get_padding(std::uintptr_t addr, std::size_t align) {
     std::size_t aligned_addr = (addr + (align - 1)) & ~(align - 1);
-    std::size_t padding = aligned_addr - addr;
+    return aligned_addr - addr;
+  }
+
+  void place_obj(std::size_t index, const std::byte* const p,
+                 cm_fptr_t place_func) {
+    if (index > 0) {
+      offsets[index] = offsets[index - 1] + type_size[index - 1];
+    } else {
+      offsets[index] = 0;
+    }
+
+    std::uintptr_t addr =
+        reinterpret_cast<std::uintptr_t>(data + offsets[size_]);
+    offsets[size_] += get_padding(addr, type_align[size_]);
+
+    reserve_cap(offsets[size_] + type_size[size_] + 1);
+    place_func(data + offsets[index], p);
+  }
+
+  void delete_data() {
+    for (std::size_t i = 0; i < size_; i++) {
+      dtable[type_index[i]](data + offsets[i]);
+    }
+    delete[] data;
+    delete[] offsets;
+    delete[] type_size;
+    delete[] type_index;
+    delete[] type_align;
+  }
+
+  void reset() {
+    size_ = 0;
+    capacity = 0;
+    entries = 0;
+    data = nullptr;
+    offsets = nullptr;
+    type_size = nullptr;
+    type_index = nullptr;
+    type_align = nullptr;
   }
 };
 
