@@ -140,7 +140,6 @@ private:
 
   void destroy_data() {
     dtable[type_index](data);
-    data = nullptr;
   }
 
   void copy_from(const variant& rhs) {
