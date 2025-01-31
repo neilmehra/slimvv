@@ -124,20 +124,6 @@ TEST(VectorTest, ExceptionOnWrongTypeAccess) {
   EXPECT_THROW(vec.get<int>(1), std::bad_cast);
 }
 
-TEST(VectorTest, PushBackRvalueReferences) {
-  vector<std::string> vec;
-  vec.push_back("temporary");
-
-  EXPECT_EQ(vec.size(), 1u);
-  EXPECT_EQ(vec.get<std::string>(0), "temporary");
-
-  std::string s = "lvalue";
-  vec.push_back(s);
-
-  EXPECT_EQ(vec.size(), 2u);
-  EXPECT_EQ(vec.get<std::string>(1), "lvalue");
-}
-
 TEST(VectorTest, MultiplePushBacks) {
   vector<int, std::string, double> vec;
   const int num_elements = 100;

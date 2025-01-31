@@ -83,8 +83,7 @@ private:
   void reserve_cap(std::size_t new_cap);
 
   template <std::size_t I, class U, class T, class... TN>
-  [[nodiscard]]
-  std::size_t find_type_index() const;
+  [[nodiscard]] std::size_t find_type_index() const;
 
   void place_obj(std::size_t index, const std::byte* const p,
                  cm_fptr_t place_func);
@@ -179,7 +178,8 @@ void vector<Types...>::push_back(const U& u) {
   type_index[size_] = index;
   type_align[size_] = alignof(U);
 
-  place_obj(size_, reinterpret_cast<std::byte*>(&u), ctable[type_index[size_]]);
+  place_obj(size_, reinterpret_cast<const std::byte*>(&u),
+            ctable[type_index[size_]]);
   size_++;
 }
 
@@ -187,15 +187,17 @@ void vector<Types...>::push_back(const U& u) {
 template <class... Types>
 template <class U>
 void vector<Types...>::push_back(U&& u) {
+
+  using Udec = std::decay_t<U>;
   if (size_ == entries) {
     reserve_entries(2 * entries + 1);
   }
 
-  std::size_t index = find_type_index<0, U, Types...>();
+  std::size_t index = find_type_index<0, Udec, Types...>();
 
-  type_size[size_] = sizeof(std::decay_t<U>);
+  type_size[size_] = sizeof(Udec);
   type_index[size_] = index;
-  type_align[size_] = alignof(std::decay_t<U>);
+  type_align[size_] = alignof(Udec);
 
   place_obj(size_, reinterpret_cast<std::byte*>(&u), mtable[type_index[size_]]);
   size_++;
