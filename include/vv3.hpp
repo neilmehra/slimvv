@@ -41,7 +41,7 @@ public:
 
   [[nodiscard]] Element operator[](std::size_t index);
 
-  template <class T> [[nodiscard]] T& get(std::size_t index);
+  template <class U> [[nodiscard]] U& get(std::size_t index);
 
   [[nodiscard]] std::size_t size() const noexcept { return size_; }
 
@@ -50,18 +50,18 @@ private:
   using dtor_fptr_t = void (*)(std::byte* const);
   using cm_fptr_t = void (*)(std::byte* const, const std::byte* const);
 
-  template <class T> static void destroy_impl(std::byte* const p) {
-    reinterpret_cast<T*>(p)->~T();
+  template <class U> static void destroy_impl(std::byte* const p) {
+    reinterpret_cast<U*>(p)->~U();
   }
 
-  template <class T>
+  template <class U>
   static void copy_impl(std::byte* const loc, const std::byte* const p) {
-    ::new (loc) T(*reinterpret_cast<const T* const>(p));
+    ::new (loc) U(*reinterpret_cast<const U* const>(p));
   }
 
-  template <class T>
+  template <class U>
   static void move_impl(std::byte* const loc, const std::byte* const p) {
-    ::new (loc) T(std::move(*reinterpret_cast<const T* const>(p)));
+    ::new (loc) U(std::move(*reinterpret_cast<const U* const>(p)));
   }
 
   static constexpr dtor_fptr_t dtable[N]{destroy_impl<Types>...};
@@ -83,6 +83,7 @@ private:
   void reserve_cap(std::size_t new_cap);
 
   template <std::size_t I, class U, class T, class... TN>
+  [[nodiscard]]
   std::size_t find_type_index() const;
 
   void place_obj(std::size_t index, const std::byte* const p,
@@ -268,7 +269,7 @@ void vector<Types...>::reserve_cap(std::size_t new_cap) {
 
 template <class... Types>
 template <std::size_t I, class U, class T, class... TN>
-std::size_t vector<Types...>::find_type_index() const {
+[[nodiscard]] std::size_t vector<Types...>::find_type_index() const {
   if constexpr (std::is_same_v<std::decay_t<U>, std::decay_t<T>>) {
     return I;
   } else {
