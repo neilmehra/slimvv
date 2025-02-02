@@ -12,7 +12,7 @@
 // bytes, but slow asf due to heap allocs on every push_back + deref every time
 // we attempt to index + no cache locality wrt the elements
 
-namespace v1 {
+namespace vv1 {
 
 namespace detail {
 
@@ -50,47 +50,73 @@ public:
 
   ~variant() { destroy_data(); }
 
-  variant(const variant& rhs) { copy_from(rhs); }
+  variant(const variant& rhs) : type_index(rhs.type_index), data(nullptr) {
+    if (!rhs.data)
+      return;
+    data = ctable[rhs.type_index](rhs.data);
+  }
 
-  variant(variant&& rhs) { move_from(rhs); }
+  variant(variant&& rhs) : type_index(rhs.type_index), data(nullptr) {
+    if (!rhs.data)
+      return;
+    data = mtable[rhs.type_index](rhs.data);
+    rhs.destroy_data();
+    rhs.data = nullptr;
+  }
 
   variant& operator=(const variant& rhs) {
-    copy_from(rhs);
+    if (this != &rhs) {
+      destroy_data();
+      if (!rhs.data)
+        return *this;
+      data = ctable[rhs.type_index](rhs.data);
+      type_index = rhs.type_index;
+    }
     return *this;
   }
 
   variant& operator=(variant&& rhs) noexcept {
-    move_from(rhs);
+    if (this != &rhs) {
+      destroy_data();
+      if (!rhs.data)
+        return *this;
+
+      data = mtable[rhs.type_index](rhs.data);
+      type_index = rhs.type_index;
+      rhs.destroy_data();
+      rhs.data = nullptr;
+    }
     return *this;
   }
 
-  template <class U> variant(const U& rhs) {
-    constexpr int u_index = detail::var_find_type_v<U, Types...>;
+  template <class U,
+            class = std::enable_if_t<!std::is_same_v<std::decay_t<U>, variant>>>
+  variant(const U& rhs) : type_index(0), data(nullptr) {
+    int u_index = detail::var_find_type_v<U, Types...>;
     assert(u_index >= 0);
     type_index = static_cast<std::size_t>(u_index);
-    data = static_cast<void*>(new U{std::forward<U>(rhs)});
+    data = new U{rhs};
   }
 
-  // if non-const T& is passed to this, then U = T&. Can't allocate a ref, so we
-  // need to decay it
-  // this gets choosen during template overload resolution if non-const ref to
-  // variant<Types...> gets passed in, so need to disable if matches
-  template <class U, typename = std::enable_if_t<
-                         !std::is_same_v<std::decay_t<U>, variant<Types...>>>>
-  variant(U&& rhs) {
+private:
+  template <class U, class = std::enable_if_t<!std::is_lvalue_reference_v<U>>>
+  using rval_ref = U&&;
+
+public:
+  template <class U> variant(rval_ref<U> rhs) {
     using Udec = std::decay_t<U>;
-    constexpr int u_index = detail::var_find_type_v<Udec, Types...>;
+    int u_index = detail::var_find_type_v<Udec, Types...>;
     assert(u_index >= 0);
     type_index = static_cast<std::size_t>(u_index);
-    data = static_cast<void*>(new Udec(std::move(rhs)));
+    data = new Udec(std::move(rhs));
   }
 
   template <class U, class... Args>
   variant(std::in_place_type_t<U>, Args&&... args) {
-    constexpr int u_index = detail::var_find_type_v<U, Types...>;
+    int u_index = detail::var_find_type_v<U, Types...>;
     assert(u_index >= 0);
     type_index = static_cast<std::size_t>(u_index);
-    data = static_cast<void*>(new U(std::forward<Args>(args)...));
+    data = new U(std::forward<Args>(args)...);
   }
 
   // Observers
@@ -139,33 +165,12 @@ private:
   static constexpr move_fptr mtable[N] = {move_impl<Types>...};
 
   void destroy_data() {
-    dtable[type_index](data);
-  }
-
-  void copy_from(const variant& rhs) {
-    if (this != &rhs) {
-      if (!rhs.data) {
-        data = nullptr;
-        return;
-      }
-      data = ctable[rhs.type_index](rhs.data);
-      type_index = rhs.type_index;
-    }
-  }
-
-  void move_from(variant& rhs) {
-    if (this != &rhs) {
-      if (!rhs.data) {
-        data = nullptr;
-        return;
-      }
-      data = mtable[rhs.type_index](rhs.data);
-      type_index = rhs.type_index;
-      rhs.data = nullptr;
+    if (data) {
+      dtable[type_index](data);
     }
   }
 };
 
 template <class... Types> using vector = std::vector<variant<Types...>>;
 
-} // namespace v1
+} // namespace vv1

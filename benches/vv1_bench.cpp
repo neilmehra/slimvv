@@ -1,8 +1,11 @@
 #include "../include/vv1.hpp"
 #include <benchmark/benchmark.h>
 #include <cstdlib>
+#include <iostream>
 
 namespace bm = benchmark;
+using vv1::vector;
+
 
 constexpr std::size_t num_iter = 5000;
 
@@ -12,7 +15,7 @@ struct BigType {
 
 void bench_pushback(bm::State& state) {
   BigType arg{};
-  v1::vector<int, long long, BigType> v;
+  vector<int, long long, BigType> v;
 
   for (auto _ : state) {
     for (std::size_t i = 0; i < num_iter; i++) {
@@ -25,7 +28,7 @@ void bench_pushback(bm::State& state) {
 
 void bench_index(bm::State& state) {
   BigType arg{};
-  v1::vector<int, long long, BigType> v;
+  vector<int, long long, BigType> v;
   for (std::size_t i = 0; i < num_iter; i++) {
     v.push_back(arg);
   }
@@ -38,5 +41,5 @@ void bench_index(bm::State& state) {
 }
 
 BENCHMARK(bench_pushback)->Unit(bm::kMillisecond);
-BENCHMARK(bench_index)->Unit(bm::kMillisecond);
+// BENCHMARK(bench_index)->Unit(bm::kMillisecond);
 BENCHMARK_MAIN();

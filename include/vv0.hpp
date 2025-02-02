@@ -3,7 +3,7 @@
 #include <variant>
 #include <vector>
 
-namespace v0 {
+namespace vv0 {
 
 // memory footprint: 16 bytes for std::vector + std::vector::capacity *
 // (max({sizeof(Types)...}) + 8 (type index))

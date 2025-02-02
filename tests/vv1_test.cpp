@@ -5,8 +5,8 @@
 #include "../include/vv1.hpp"
 
 // For convenience
-using VariantType = v1::variant<int, double, std::string>;
-using VectorType = v1::vector<int, double, std::string>;
+using VariantType = vv1::variant<int, double, std::string>;
+using VectorType = vv1::vector<int, double, std::string>;
 
 
 //------------------------------------------------------------------------------
