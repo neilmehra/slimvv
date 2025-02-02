@@ -6,9 +6,15 @@ struct Tracker {
   static int constructions;
   static int destructions;
 
-  Tracker() { ++constructions; }
-  Tracker(const Tracker&) { ++constructions; }
-  Tracker(Tracker&&) noexcept { ++constructions; }
+  Tracker() {
+    ++constructions;
+    std::cout << "default ctor on tracker" << std::endl;
+  }
+  Tracker(const Tracker&) {
+    ++constructions;
+    std::cout << "copy ctor on tracker " << std::endl;
+  }
+  Tracker(Tracker&&) { std::cout << "move ctor on tracker " << std::endl; };
   ~Tracker() { ++destructions; }
 
   static void reset() {
@@ -154,7 +160,12 @@ TEST(VectorTest, MultiplePushBacks) {
 TEST(VectorTest, DestructionOfElements) {
   Tracker::reset();
   {
+    // 4 2 4 w/ reserve on mine
+    // 4 2 4 w/ reserve on std
     vector<Tracker> vec;
+    vec.reserve_cap(sizeof(Tracker) * 100);
+    vec.reserve_entries(100);
+    // vec.reserve(100);
     vec.push_back(Tracker());
     vec.push_back(Tracker());
     EXPECT_EQ(Tracker::constructions, 2);

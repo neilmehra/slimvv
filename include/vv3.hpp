@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <iostream>
 #include <type_traits>
 #include <typeinfo>
 #include <utility>
@@ -34,10 +35,20 @@ public:
 
   vector& operator=(vector&& rhs);
 
+  void reserve_entries(std::size_t new_entries);
+
+  void reserve_cap(std::size_t new_cap);
+
   template <class U> void push_back(const U& u);
 
-  // TODO might need to look at this ?
-  template <class U> void push_back(U&& u);
+private:
+  // sfinae this to stop the universal rref push_back from competing in overload
+  // resolution if U is lvalue
+  template <class U, class = std::enable_if_t<!std::is_lvalue_reference_v<U>>>
+  using rval_ref = U&&;
+
+public:
+  template <class U> void push_back(rval_ref<U> u);
 
   [[nodiscard]] Element operator[](std::size_t index);
 
@@ -61,7 +72,7 @@ private:
 
   template <class U>
   static void move_impl(std::byte* const loc, const std::byte* const p) {
-    ::new (loc) U(std::move(*reinterpret_cast<const U* const>(p)));
+    ::new (loc) U(std::move(*reinterpret_cast<U*>(const_cast<std::byte*>(p))));
   }
 
   static constexpr dtor_fptr_t dtable[N]{destroy_impl<Types>...};
@@ -77,10 +88,6 @@ private:
   std::size_t* type_size;
   std::size_t* type_index;
   std::size_t* type_align;
-
-  void reserve_entries(std::size_t new_entries);
-
-  void reserve_cap(std::size_t new_cap);
 
   template <std::size_t I, class U, class T, class... TN>
   [[nodiscard]] std::size_t find_type_index() const;
@@ -106,8 +113,7 @@ template <class... Types> vector<Types...>::vector(const vector& rhs) {
   reset();                      // bad practice?
   reserve_entries(rhs.entries); // handles initialization of entries, offsets,
                                 // type_size, type_index, type_align
-  size_ = rhs.size_;
-  for (std::size_t i = 0; i < size_; i++) {
+  for (std::size_t i = 0; i < rhs.size_; i++) {
     type_size[i] = rhs.type_size[i];
     type_index[i] = rhs.type_index[i];
     type_align[i] = rhs.type_align[i];
@@ -134,8 +140,7 @@ vector<Types...>& vector<Types...>::operator=(const vector& rhs) {
 
     reserve_entries(rhs.entries); // handles initialization of entries, offsets,
                                   // type_size, type_index, type_align
-    size_ = rhs.size_;
-    for (std::size_t i = 0; i < size_; i++) {
+    for (std::size_t i = 0; i < rhs.size_; i++) {
       type_size[i] = rhs.type_size[i];
       type_index[i] = rhs.type_index[i];
       type_align[i] = rhs.type_align[i];
@@ -178,16 +183,13 @@ void vector<Types...>::push_back(const U& u) {
   type_index[size_] = index;
   type_align[size_] = alignof(U);
 
-  place_obj(size_, reinterpret_cast<const std::byte*>(&u),
+  place_obj(size_, reinterpret_cast<const std::byte* const>(&u),
             ctable[type_index[size_]]);
-  size_++;
 }
 
-// TODO might need to look at this ?
 template <class... Types>
 template <class U>
-void vector<Types...>::push_back(U&& u) {
-
+void vector<Types...>::push_back(rval_ref<U> u) {
   using Udec = std::decay_t<U>;
   if (size_ == entries) {
     reserve_entries(2 * entries + 1);
@@ -199,8 +201,8 @@ void vector<Types...>::push_back(U&& u) {
   type_index[size_] = index;
   type_align[size_] = alignof(Udec);
 
-  place_obj(size_, reinterpret_cast<std::byte*>(&u), mtable[type_index[size_]]);
-  size_++;
+  place_obj(size_, reinterpret_cast<const std::byte* const>(&u),
+            mtable[type_index[size_]]);
 }
 
 template <class... Types>
@@ -241,9 +243,9 @@ void vector<Types...>::reserve_entries(std::size_t new_entries) {
     delete[] type_align;
 
     offsets = new_offsets;
+    entries = new_entries;
     type_size = new_type_size;
     type_index = new_types;
-    entries = new_entries;
     type_align = new_type_align;
   }
 }
@@ -251,6 +253,8 @@ void vector<Types...>::reserve_entries(std::size_t new_entries) {
 template <class... Types>
 void vector<Types...>::reserve_cap(std::size_t new_cap) {
   if (new_cap > capacity) {
+    std::cout << "reserving cap from " << capacity << " to " << new_cap
+              << std::endl;
     std::byte* new_data = new std::byte[new_cap];
     for (std::size_t i = 0; i < size_; i++) {
       std::size_t old_offset = offsets[i];
@@ -291,8 +295,12 @@ void vector<Types...>::place_obj(std::size_t index, const std::byte* const p,
   std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(data + offsets[size_]);
   offsets[size_] += get_padding(addr, type_align[size_]);
 
-  reserve_cap(offsets[size_] + type_size[size_] + 1);
+  std::size_t new_cap = offsets[size_] + type_size[size_] + 1;
+  if (new_cap > capacity) {
+    reserve_cap(std::max(new_cap, capacity * 2));
+  }
   place_func(data + offsets[index], p);
+  size_++;
 }
 
 template <class... Types> void vector<Types...>::delete_data() {
