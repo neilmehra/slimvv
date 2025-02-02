@@ -253,8 +253,6 @@ void vector<Types...>::reserve_entries(std::size_t new_entries) {
 template <class... Types>
 void vector<Types...>::reserve_cap(std::size_t new_cap) {
   if (new_cap > capacity) {
-    std::cout << "reserving cap from " << capacity << " to " << new_cap
-              << std::endl;
     std::byte* new_data = new std::byte[new_cap];
     for (std::size_t i = 0; i < size_; i++) {
       std::size_t old_offset = offsets[i];
