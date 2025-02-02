@@ -21,6 +21,20 @@ constexpr std::size_t get_padding(std::uintptr_t addr, std::size_t align) {
   return aligned_addr - addr;
 }
 
+template <class U> void destroy_impl(std::byte* const p) {
+  reinterpret_cast<U*>(p)->~U();
+}
+
+template <class U>
+void copy_impl(std::byte* const loc, const std::byte* const p) {
+  ::new (loc) U(*reinterpret_cast<const U* const>(p));
+}
+
+template <class U>
+void move_impl(std::byte* const loc, const std::byte* const p) {
+  ::new (loc) U(std::move(*reinterpret_cast<U*>(const_cast<std::byte*>(p))));
+}
+
 template <class... Types> class vector {
 public:
   vector();
@@ -60,20 +74,6 @@ private:
   static constexpr std::size_t N = sizeof...(Types);
   using dtor_fptr_t = void (*)(std::byte* const);
   using cm_fptr_t = void (*)(std::byte* const, const std::byte* const);
-
-  template <class U> static void destroy_impl(std::byte* const p) {
-    reinterpret_cast<U*>(p)->~U();
-  }
-
-  template <class U>
-  static void copy_impl(std::byte* const loc, const std::byte* const p) {
-    ::new (loc) U(*reinterpret_cast<const U* const>(p));
-  }
-
-  template <class U>
-  static void move_impl(std::byte* const loc, const std::byte* const p) {
-    ::new (loc) U(std::move(*reinterpret_cast<U*>(const_cast<std::byte*>(p))));
-  }
 
   static constexpr dtor_fptr_t dtable[N]{destroy_impl<Types>...};
   static constexpr cm_fptr_t ctable[N]{copy_impl<Types>...};

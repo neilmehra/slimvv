@@ -56,11 +56,7 @@ public:
     data = ctable[rhs.type_index](rhs.data);
   }
 
-  variant(variant&& rhs) : type_index(rhs.type_index), data(nullptr) {
-    if (!rhs.data)
-      return;
-    data = mtable[rhs.type_index](rhs.data);
-    rhs.destroy_data();
+  variant(variant&& rhs) : type_index(rhs.type_index), data(rhs.data) {
     rhs.data = nullptr;
   }
 
@@ -81,9 +77,8 @@ public:
       if (!rhs.data)
         return *this;
 
-      data = mtable[rhs.type_index](rhs.data);
+      data = rhs.data;
       type_index = rhs.type_index;
-      rhs.destroy_data();
       rhs.data = nullptr;
     }
     return *this;
@@ -155,14 +150,8 @@ private:
     return new T(*static_cast<const T* const>(p));
   }
 
-  using move_fptr = void* (*)(const void* const);
-  template <class T> static void* move_impl(const void* const p) {
-    return new T(std::move(*static_cast<const T* const>(p)));
-  }
-
   static constexpr destructor_fptr dtable[N] = {destroy_impl<Types>...};
   static constexpr copy_fptr ctable[N] = {copy_impl<Types>...};
-  static constexpr move_fptr mtable[N] = {move_impl<Types>...};
 
   void destroy_data() {
     if (data) {
